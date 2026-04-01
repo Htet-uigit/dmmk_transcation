@@ -44,7 +44,6 @@ st.markdown("""
     a.account-link:hover {
         text-decoration: underline;
     }
-    /* Subtle Text Link Style */
     .subtle-jump {
         font-size: 0.85rem;
         color: #1f77b4 !important;
@@ -73,6 +72,9 @@ if 'display_name' not in st.session_state:
     st.session_state.display_name = ""
 if 'analysis_months' not in st.session_state:
     st.session_state.analysis_months = 1
+# NEW: Track the index of the Quick Tracker radio button
+if 'recency_index' not in st.session_state:
+    st.session_state.recency_index = 0 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_cached_analysis(target_id, months):
@@ -104,6 +106,17 @@ def load_account_data(identifier, months):
             st.error("Username or ID not found.")
         return False
 
+# Trigger Functions for Mutual Override
+def on_slider_change():
+    """Reset the Quick Tracker to 'Full History' if the month slider moves."""
+    st.session_state.recency_index = 0
+
+def on_tracker_change():
+    """Reset the Month Slider to 1 if a short-term Tracker is picked."""
+    tracker_val = st.session_state.quick_tracker_radio
+    if tracker_val != "Full History":
+        st.session_state.analysis_months = 1
+
 # URL Query Parameter Check
 target_from_url = st.query_params.get("target_account")
 name_from_url = st.query_params.get("name")
@@ -120,8 +133,13 @@ if input_method == "Username":
 else:
     user_input = st.sidebar.text_input("Enter Stellar ID", placeholder="G...")
 
-analysis_months = st.sidebar.slider("Timeframe (Months)", 1, 12, st.session_state.analysis_months)
-st.session_state.analysis_months = analysis_months 
+# Updated Slider with on_change trigger
+analysis_months = st.sidebar.slider(
+    "Timeframe (Months)", 
+    1, 12, 
+    key="analysis_months", 
+    on_change=on_slider_change
+)
 
 col_side1, col_side2 = st.sidebar.columns(2)
 run_btn = col_side1.button("Analyze Account", use_container_width=True)
@@ -130,12 +148,13 @@ clear_btn = col_side2.button("Clear Cache", use_container_width=True)
 if clear_btn:
     st.session_state.stellar_data = None
     st.session_state.display_name = ""
+    st.session_state.recency_index = 0
     st.query_params.clear()
     fetch_cached_analysis.clear() 
     st.rerun()
 
 if run_btn and user_input:
-    load_account_data(user_input, analysis_months)
+    load_account_data(user_input, st.session_state.analysis_months)
 
 # 4. Main Dashboard
 st.markdown("<div id='top-anchor'></div>", unsafe_allow_html=True)
@@ -167,8 +186,19 @@ if st.session_state.stellar_data:
         sel_week = st.selectbox("Filter by Week", weeks_list)
         
     with t3:
-        recency = st.radio("Quick Tracker", ["Full History", "Last 7 Days", "Last 24 Hours"], horizontal=True)
-        # Subtle Jump Link placed directly under Quick Tracker
+        # Updated Radio with index tracking and on_change trigger
+        recency = st.radio(
+            "Quick Tracker", 
+            ["Full History", "Last 7 Days", "Last 24 Hours"], 
+            index=st.session_state.recency_index,
+            horizontal=True,
+            key="quick_tracker_radio",
+            on_change=on_tracker_change
+        )
+        # Update recency_index manually to ensure consistency
+        options = ["Full History", "Last 7 Days", "Last 24 Hours"]
+        st.session_state.recency_index = options.index(recency)
+
         st.markdown('<a href="#summary-section" class="subtle-jump">Jump to Account Summary</a>', unsafe_allow_html=True)
 
     # Asset Selector Pills
@@ -232,7 +262,6 @@ if st.session_state.stellar_data:
         st.markdown("---")
         st.subheader("Summary by Account")
         
-        # Sorting Controls
         s1, s2 = st.columns([2, 1])
         with s1:
             sort_metric = st.selectbox(
@@ -260,7 +289,6 @@ if st.session_state.stellar_data:
         account_summary['Net_Difference'] = account_summary['Incoming'] - account_summary['Outgoing']
         account_summary = account_summary.sort_values(sort_metric, ascending=ascending_bool).head(10)
 
-        # Format Summary Table
         disp_summary = account_summary.copy()
         disp_summary['Other Account Link'] = disp_summary.apply(create_html_link, axis=1)
         disp_summary['Total Volume'] = disp_summary['Total_Volume'].apply(lambda x: f"{x:,.2f}")
